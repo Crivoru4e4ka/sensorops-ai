@@ -51,6 +51,21 @@ _MEDIUM_PRIORITY_THRESHOLD = 0.4
 _VOLUME_RE = re.compile(
     r"(\d+)\s*(?:штук\w*|шт\.?|датчик\w*|единиц\w*|позиций\w*)", re.IGNORECASE
 )
+# «поставку 200 индуктивных датчиков» — между числом и ключевым словом могут быть прилагательные
+_VOLUME_RE_LOOSE = re.compile(
+    r"(\d+)\s+[а-яёa-z\s-]{0,40}?(?:штук\w*|шт\.?|датчик\w*|единиц\w*|позиций\w*)",
+    re.IGNORECASE,
+)
+
+# Корни категорий для нечёткого сопоставления с каталогом («индуктивные» → «индуктивный»)
+CATEGORY_ROOTS = {
+    "индуктив": "индуктивный",
+    "оптическ": "оптический",
+    "давлени": "давления",
+    "температур": "температуры",
+    "емкостн": "ёмкостный",
+    "ёмкостн": "ёмкостный",
+}
 
 _INDUSTRY_HINTS = [
     (r"нефте|газ|петро|oil|gas", "нефтегаз"),
@@ -96,6 +111,9 @@ def extract_order_volume(text: str) -> int:
     matches = _VOLUME_RE.findall(text or "")
     if matches:
         return max(int(value) for value in matches)
+    loose_matches = _VOLUME_RE_LOOSE.findall(text or "")
+    if loose_matches:
+        return max(int(value) for value in loose_matches)
     # Словами: двести, триста, пятьдесят... (по границам слов, чтобы «просто» не ловилось как «сто»)
     numbers_ru = {
         "десять": 10, "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
@@ -113,21 +131,35 @@ def extract_order_volume(text: str) -> int:
 
 
 def _requested_product_hits(card: CRMLeadCard, catalog: pd.DataFrame) -> list[dict[str, Any]]:
-    """Сопоставляет запрошенные продукты со строками каталога (по названию/категории)."""
+    """Сопоставляет запрошенные продукты со строками каталога.
+
+    Устойчиво к свободному формату LLM: «Индуктивные датчики, резьба M18…»
+    матчится по корню категории («индуктив»), артикулы/серии — по токенам названия.
+    """
     if catalog is None or catalog.empty:
         return []
     hits: dict[str, dict[str, Any]] = {}
+
+    def _row_matches(text: str, row: pd.Series) -> bool:
+        lowered = text.lower()
+        # 1) корень категории («индуктивные датчики» → категория «индуктивный»)
+        category = str(row["category"]).lower()
+        for root, canonical in CATEGORY_ROOTS.items():
+            if root in lowered and canonical == category:
+                return True
+        if category in lowered:
+            return True
+        # 2) совпадение ≥2 значимых токенов названия («Autonics PR18-08DN»)
+        name_tokens = [
+            token for token in re.findall(r"[a-zа-яё0-9]+", str(row["name"]).lower())
+            if len(token) >= 3
+        ]
+        present = sum(1 for token in name_tokens if token in lowered)
+        return present >= 2 and len(name_tokens) >= 2
+
     for product in card.requested_products:
         lowered = product.lower()
-        match = catalog[
-            catalog.apply(
-                lambda row: (
-                    lowered in str(row["name"]).lower()
-                    or str(row["category"]).lower() in lowered
-                ),
-                axis=1,
-            )
-        ]
+        match = catalog[catalog.apply(lambda row: _row_matches(lowered, row), axis=1)]
         if not match.empty:
             best = match.sort_values("in_stock", ascending=False).iloc[0]
             hits[product] = {

@@ -90,3 +90,29 @@ def test_order_volume_extraction() -> None:
     assert extract_order_volume("Заказ на 350 позиций") == 350
     assert extract_order_volume("Партия пятьдесят штук") == 50
     assert extract_order_volume("Просто интересуются") == 1
+
+
+def test_order_volume_from_llm_style_text() -> None:
+    """LLM может вернуть «поставку 200 индуктивных датчиков» — объём должен извлекаться."""
+    assert extract_order_volume("запросил срочную поставку 200 индуктивных датчиков с резьбой М18") == 200
+    assert extract_order_volume("нужны 50 датчиков давления") == 50
+
+
+def test_catalog_match_from_llm_style_products(catalog_df) -> None:
+    """Свободный формат LLM («Индуктивные датчики, резьба M18…») должен матчиться с каталогом."""
+    from src.schemas.lead import CRMLeadCard
+    from src.services.scoring_service import _requested_product_hits
+
+    card = CRMLeadCard(
+        company_name="ПромСтройМаш",
+        client_name="Дмитрий",
+        contact_info="d@x.ru",
+        requested_products=["Индуктивные датчики, резьба M18, выход PNP, питание 24 В, 200 шт."],
+        urgency="критическая",
+        deal_stage="запрос КП",
+        summary="срочная поставка 200 индуктивных датчиков",
+        action_items=[],
+    )
+    hits = _requested_product_hits(card, catalog_df)
+    assert hits and hits[0]["found"], "Продукт в формате LLM должен найтись в каталоге"
+    assert hits[0]["in_stock"], "В каталоге есть индуктивные датчики в наличии"
