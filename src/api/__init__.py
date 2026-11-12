@@ -1,0 +1,1 @@
+"""FastAPI-маршруты SensorOps AI."""

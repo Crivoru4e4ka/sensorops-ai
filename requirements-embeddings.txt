@@ -1,0 +1,6 @@
+# ─── Полные эмбеддинги (опционально) ─────────────────────────────────────────
+# sentence-transformers тянет torch. На сетях с медленным доступом к
+# download.pytorch.org ставьте CPU-версию отдельно:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+#   pip install -r requirements-embeddings.txt
+sentence-transformers>=3.0
