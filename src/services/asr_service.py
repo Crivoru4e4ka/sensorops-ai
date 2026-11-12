@@ -134,6 +134,8 @@ def _llm_extract(text: str) -> CRMLeadCard:
             "temperature": 0.0,
             "timeout": settings.llm_timeout,
         }
+        if settings.llm_api_key:
+            kwargs["api_key"] = settings.llm_api_key
         if settings.llm_api_base:
             kwargs["base_url"] = settings.llm_api_base
         card = client.chat.completions.create(**kwargs)
